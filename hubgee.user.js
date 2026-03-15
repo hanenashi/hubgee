@@ -1,11 +1,8 @@
-test test test
-
-    
 // ==UserScript==
 // @name         Hubgee - Undo & Verify Bridge
 // @namespace    http://tampermonkey.net/
-// @version      1.7
-// @description  Bridge with persistent reload-proof undo, payload verification, and React UI bypass.
+// @version      1.8
+// @description  Bridge with persistent reload-proof undo, payload verification, and native CodeMirror 6 bypass.
 // @match        https://gemini.google.com/*
 // @match        https://github.com/*/edit/*
 // @grant        GM_setValue
@@ -20,7 +17,6 @@ test test test
     const isGemini = window.location.hostname === 'gemini.google.com';
     const isGitHub = window.location.hostname === 'github.com';
 
-    // Helper to show a floating notification on screen
     function showToast(message, bgColor) {
         const toast = document.createElement('div');
         toast.textContent = message;
@@ -87,60 +83,64 @@ test test test
     }
 
     // ==========================================
-    // MODULE 2: GITHUB - BACKUP, NUKE, VERIFY
+    // MODULE 2: GITHUB - CODE MIRROR 6 HACK
     // ==========================================
     if (isGitHub) {
-        // Bypass React's event traps to force an update
-        function injectTextIntoReact(text) {
-            document.execCommand('selectAll');
-            document.execCommand('insertText', false, text);
-            
-            const textarea = document.querySelector('textarea.file-editor-textarea') || document.activeElement;
-            if (textarea && textarea.tagName === 'TEXTAREA') {
-                const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
-                if (nativeSetter) {
-                    nativeSetter.call(textarea, text);
-                } else {
-                    textarea.value = text;
-                }
-                textarea.dispatchEvent(new Event('input', { bubbles: true }));
-                textarea.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        }
-
-        // Steal the full text directly from React's memory to bypass DOM virtualization
-        function getReactEditorText() {
+        
+        // --- THE HOLY GRAIL: CodeMirror 6 API Extractor ---
+        function getFullEditorText() {
             try {
-                const editorEl = document.querySelector('.react-code-text-editor, .cm-editor, textarea.file-editor-textarea') || document.activeElement;
-                if (!editorEl) return null;
-
-                const reactKey = Object.keys(editorEl).find(k => k.startsWith('__reactFiber$'));
-                if (!reactKey) return null;
-
-                let fiber = editorEl[reactKey];
-                let bestText = null;
-                let maxLength = -1;
-
-                // Walk up the tree to find the prop containing the massive code string
-                for (let i = 0; i < 30 && fiber; i++) {
-                    const props = fiber.memoizedProps || {};
-                    const potentialText = props.value || props.text || props.content;
-                    
-                    if (typeof potentialText === 'string' && potentialText.length > maxLength) {
-                        maxLength = potentialText.length;
-                        bestText = potentialText;
-                    }
-                    fiber = fiber.return;
-                }
-                
-                if (bestText !== null && bestText.length > 0) {
-                    console.log(`[Hubgee] React Memory Hack extracted ${bestText.length} chars.`);
-                    return bestText;
+                const cmContent = document.querySelector('.cm-content');
+                if (cmContent && cmContent.cmView && cmContent.cmView.view) {
+                    const text = cmContent.cmView.view.state.doc.toString();
+                    console.log(`[Hubgee] CM6 backup successful: ${text.length} chars.`);
+                    return text;
                 }
             } catch (err) {
-                console.error("[Hubgee] React Memory Hack failed:", err);
+                console.error("[Hubgee] CM6 extraction failed:", err);
             }
-            return null;
+            
+            // Fallback to DOM if CM6 isn't loaded
+            console.log("[Hubgee] Falling back to standard DOM extraction...");
+            document.execCommand('selectAll');
+            return document.activeElement?.value || document.querySelector('textarea.file-editor-textarea')?.value || window.getSelection().toString() || "";
+        }
+
+        // --- THE HOLY GRAIL: CodeMirror 6 API Injector ---
+        function injectFullEditorText(newText) {
+            let injected = false;
+            try {
+                const cmContent = document.querySelector('.cm-content');
+                if (cmContent && cmContent.cmView && cmContent.cmView.view) {
+                    const view = cmContent.cmView.view;
+                    view.dispatch({
+                        changes: { from: 0, to: view.state.doc.length, insert: newText }
+                    });
+                    console.log("[Hubgee] CM6 native injection successful.");
+                    injected = true;
+                }
+            } catch (err) {
+                console.error("[Hubgee] CM6 native injection failed:", err);
+            }
+
+            // Fallback for older GitHub UI
+            if (!injected) {
+                console.log("[Hubgee] Falling back to React DOM injection...");
+                document.execCommand('selectAll');
+                document.execCommand('insertText', false, newText);
+                
+                const textarea = document.querySelector('textarea.file-editor-textarea') || document.activeElement;
+                if (textarea && textarea.tagName === 'TEXTAREA') {
+                    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+                    if (nativeSetter) {
+                        nativeSetter.call(textarea, newText);
+                    } else {
+                        textarea.value = newText;
+                    }
+                    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                    textarea.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }
         }
 
         setTimeout(() => {
@@ -165,7 +165,7 @@ test test test
                     showToast("No backup found in memory!", "#ef4444");
                     return;
                 }
-                injectTextIntoReact(backupText);
+                injectFullEditorText(backupText);
                 showToast("Restored from persistent backup!", "#f59e0b");
             };
 
@@ -189,27 +189,19 @@ test test test
                     return;
                 }
 
-                // 1. BACKUP CURRENT CODE (Memory Hack first, DOM extraction as fallback)
-                let currentCode = getReactEditorText();
-                
-                if (!currentCode) {
-                    console.log("[Hubgee] Memory Hack failed. Falling back to DOM extraction...");
-                    document.execCommand('selectAll');
-                    const activeEl = document.activeElement;
-                    currentCode = activeEl?.value || document.querySelector('.file-editor-textarea')?.value || window.getSelection().toString() || "";
-                }
-                
+                // 1. BACKUP FULL CURRENT CODE VIA CM6 NATIVE STATE
+                const currentCode = getFullEditorText();
                 if (currentCode) {
                     GM_setValue('hubgee_backup', currentCode);
                     console.log(`[Hubgee] Backed up ${currentCode.length} chars to GM storage.`);
                 }
 
                 // 2. NUKE & INJECT
-                injectTextIntoReact(incomingData.text);
+                injectFullEditorText(incomingData.text);
 
                 // 3. VERIFY
                 setTimeout(() => {
-                    const checkText = getReactEditorText() || document.activeElement?.value || "";
+                    const checkText = getFullEditorText();
                     const injectedLength = checkText.length;
                     const lengthDiff = Math.abs(injectedLength - incomingData.length);
                     
