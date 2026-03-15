@@ -1,10 +1,8 @@
-// ==UserScript== test test
 
-
-
+// ==UserScript==
 // @name         Hubgee - Undo & Verify Bridge
 // @namespace    http://tampermonkey.net/
-// @version      1.6
+// @version      1.7
 // @description  Bridge with persistent reload-proof undo, payload verification, and React UI bypass.
 // @match        https://gemini.google.com/*
 // @match        https://github.com/*/edit/*
@@ -90,14 +88,11 @@
     // MODULE 2: GITHUB - BACKUP, NUKE, VERIFY
     // ==========================================
     if (isGitHub) {
-        // Helper function to bypass React's event traps
+        // Bypass React's event traps to force an update
         function injectTextIntoReact(text) {
             document.execCommand('selectAll');
-            
-            // Attempt 1: Native execCommand
             document.execCommand('insertText', false, text);
             
-            // Attempt 2: React Native Setter Hack
             const textarea = document.querySelector('textarea.file-editor-textarea') || document.activeElement;
             if (textarea && textarea.tagName === 'TEXTAREA') {
                 const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
@@ -106,10 +101,44 @@
                 } else {
                     textarea.value = text;
                 }
-                // Fire events so React registers the change
                 textarea.dispatchEvent(new Event('input', { bubbles: true }));
                 textarea.dispatchEvent(new Event('change', { bubbles: true }));
             }
+        }
+
+        // Steal the full text directly from React's memory to bypass DOM virtualization
+        function getReactEditorText() {
+            try {
+                const editorEl = document.querySelector('.react-code-text-editor, .cm-editor, textarea.file-editor-textarea') || document.activeElement;
+                if (!editorEl) return null;
+
+                const reactKey = Object.keys(editorEl).find(k => k.startsWith('__reactFiber$'));
+                if (!reactKey) return null;
+
+                let fiber = editorEl[reactKey];
+                let bestText = null;
+                let maxLength = -1;
+
+                // Walk up the tree to find the prop containing the massive code string
+                for (let i = 0; i < 30 && fiber; i++) {
+                    const props = fiber.memoizedProps || {};
+                    const potentialText = props.value || props.text || props.content;
+                    
+                    if (typeof potentialText === 'string' && potentialText.length > maxLength) {
+                        maxLength = potentialText.length;
+                        bestText = potentialText;
+                    }
+                    fiber = fiber.return;
+                }
+                
+                if (bestText !== null && bestText.length > 0) {
+                    console.log(`[Hubgee] React Memory Hack extracted ${bestText.length} chars.`);
+                    return bestText;
+                }
+            } catch (err) {
+                console.error("[Hubgee] React Memory Hack failed:", err);
+            }
+            return null;
         }
 
         setTimeout(() => {
@@ -158,10 +187,15 @@
                     return;
                 }
 
-                // 1. BACKUP CURRENT CODE
-                document.execCommand('selectAll');
-                const activeEl = document.activeElement;
-                let currentCode = activeEl?.value || document.querySelector('.file-editor-textarea')?.value || window.getSelection().toString() || "";
+                // 1. BACKUP CURRENT CODE (Memory Hack first, DOM extraction as fallback)
+                let currentCode = getReactEditorText();
+                
+                if (!currentCode) {
+                    console.log("[Hubgee] Memory Hack failed. Falling back to DOM extraction...");
+                    document.execCommand('selectAll');
+                    const activeEl = document.activeElement;
+                    currentCode = activeEl?.value || document.querySelector('.file-editor-textarea')?.value || window.getSelection().toString() || "";
+                }
                 
                 if (currentCode) {
                     GM_setValue('hubgee_backup', currentCode);
@@ -173,9 +207,8 @@
 
                 // 3. VERIFY
                 setTimeout(() => {
-                    const targetTextarea = document.querySelector('textarea.file-editor-textarea') || document.activeElement;
-                    const injectedLength = targetTextarea?.value?.length || 0;
-                    
+                    const checkText = getReactEditorText() || document.activeElement?.value || "";
+                    const injectedLength = checkText.length;
                     const lengthDiff = Math.abs(injectedLength - incomingData.length);
                     
                     if (lengthDiff < 50 || injectedLength === 0) { 
@@ -184,7 +217,7 @@
                         showToast(`❌ WARNING: Expected ${incomingData.length} but found ${injectedLength}!`, '#ef4444');
                         console.error("[Hubgee] Truncation detected. Hit Undo to restore.");
                     }
-                }, 100);
+                }, 150);
             };
 
             btnContainer.appendChild(undoBtn);
