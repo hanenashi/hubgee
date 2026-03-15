@@ -1,8 +1,8 @@
-// ==UserScript== YEST
-// @name         Hubgee - Undo & Verify Bridge
+// ==UserScript==
+// @name         Hubgee - The Tactical Nuke Bridge
 // @namespace    http://tampermonkey.net/
-// @version      1.9
-// @description  Bridge with persistent reload-proof undo, payload verification, and Deep React Memory scraping.
+// @version      2.1
+// @description  Lean bridge between Gemini and GitHub. Overwrites code with haptic and visual feedback.
 // @match        https://gemini.google.com/*
 // @match        https://github.com/*/edit/*
 // @grant        GM_setValue
@@ -29,12 +29,12 @@
             pointer-events: none; text-align: center; white-space: nowrap;
         `;
         document.body.appendChild(toast);
-        setTimeout(() => { toast.style.opacity = '0'; }, 2500);
-        setTimeout(() => { toast.remove(); }, 2800);
+        setTimeout(() => toast.style.opacity = '0', 2000);
+        setTimeout(() => toast.remove(), 2300);
     }
 
     // ==========================================
-    // MODULE 1: GEMINI - PACKAGE & PUSH
+    // MODULE 1: GEMINI - PUSH
     // ==========================================
     if (isGemini) {
         setInterval(() => {
@@ -56,13 +56,7 @@
                         e.preventDefault();
                         const rawCode = block.innerText;
                         
-                        const payload = {
-                            text: rawCode,
-                            length: rawCode.length,
-                            timestamp: Date.now()
-                        };
-                        
-                        GM_setValue('hubgee_payload', JSON.stringify(payload));
+                        GM_setValue('hubgee_payload', rawCode);
                         showToast(`Stored ${rawCode.length} chars!`, '#16a34a');
                         
                         const originalBg = block.style.backgroundColor;
@@ -83,84 +77,10 @@
     }
 
     // ==========================================
-    // MODULE 2: GITHUB - DEEP MEMORY HACK
+    // MODULE 2: GITHUB - TACTICAL NUKE
     // ==========================================
     if (isGitHub) {
         
-        // --- EXTRACTION: Deep Memory Scraper ---
-        function getFullEditorText() {
-            let bestText = "";
-
-            // Strategy 1: Brute Force CM6 Properties
-            const scanCM6 = (el) => {
-                if(!el) return;
-                for (let key in el) {
-                    try {
-                        let val = el[key];
-                        if (val && typeof val === 'object') {
-                            if (val.state && val.state.doc && typeof val.state.doc.toString === 'function') {
-                                let str = val.state.doc.toString();
-                                if (str.length > bestText.length) bestText = str;
-                            }
-                            if (val.view && val.view.state && val.view.state.doc && typeof val.view.state.doc.toString === 'function') {
-                                let str = val.view.state.doc.toString();
-                                if (str.length > bestText.length) bestText = str;
-                            }
-                        }
-                    } catch(e) {}
-                }
-            };
-            scanCM6(document.querySelector('.cm-content'));
-            scanCM6(document.querySelector('.cm-editor'));
-
-            // Strategy 2: Deep React Fiber String Mining
-            const elements = ['.cm-content', '.cm-editor', '.react-code-text-editor'];
-            for (let selector of elements) {
-                const el = document.querySelector(selector);
-                if (!el) continue;
-
-                const reactKey = Object.keys(el).find(k => k.startsWith('__reactFiber$'));
-                if (!reactKey) continue;
-
-                let node = el[reactKey];
-                for (let i = 0; i < 50 && node; i++) {
-                    const targets = [node.memoizedProps, node.memoizedState];
-                    for (let obj of targets) {
-                        if (!obj) continue;
-                        for (let key in obj) {
-                            try {
-                                const val = obj[key];
-                                if (typeof val === 'string' && val.length > bestText.length) {
-                                    bestText = val;
-                                } else if (val && typeof val === 'object') {
-                                    if (typeof val.value === 'string' && val.value.length > bestText.length) bestText = val.value;
-                                    if (typeof val.text === 'string' && val.text.length > bestText.length) bestText = val.text;
-                                    if (typeof val.doc === 'string' && val.doc.length > bestText.length) bestText = val.doc;
-                                    // Catch CM6 doc hidden in React state
-                                    if (val.doc && typeof val.doc.toString === 'function') {
-                                        const docStr = val.doc.toString();
-                                        if (docStr.length > bestText.length) bestText = docStr;
-                                    }
-                                }
-                            } catch(e) {}
-                        }
-                    }
-                    node = node.return; // Walk up the React Tree
-                }
-            }
-            
-            if (bestText.length > 0) {
-                console.log(`[Hubgee] Deep Memory Extraction successful: ${bestText.length} chars.`);
-                return bestText;
-            }
-
-            // Fallback to DOM
-            console.log("[Hubgee] Memory Hacks failed. Falling back to DOM...");
-            document.execCommand('selectAll');
-            return document.activeElement?.value || document.querySelector('textarea.file-editor-textarea')?.value || window.getSelection().toString() || "";
-        }
-
-        // --- INJECTION: React UI Bypass ---
         function injectFullEditorText(newText) {
             document.execCommand('selectAll');
             document.execCommand('insertText', false, newText);
@@ -178,35 +98,40 @@
             }
         }
 
-        // Interval checks for soft navigations
+        function triggerNukeEffects() {
+            // 1. Haptics: brrr, brrrr, brrrrrrrrrr
+            if (navigator.vibrate) {
+                navigator.vibrate([100, 50, 200, 50, 500]);
+            }
+
+            // 2. Visuals: Harsh red screen flash
+            const flash = document.createElement('div');
+            flash.style.cssText = `
+                position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+                background-color: rgba(255, 0, 0, 0.4);
+                z-index: 9999999; pointer-events: none;
+                transition: opacity 0.4s ease-out; opacity: 1;
+            `;
+            document.body.appendChild(flash);
+            
+            // Trigger the fade out immediately after the browser paints it
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    flash.style.opacity = '0';
+                });
+            });
+            
+            // Clean up the DOM after the fade
+            setTimeout(() => flash.remove(), 400);
+        }
+
         setInterval(() => {
-            // Only inject if on an edit page and buttons don't exist
             if (window.location.href.includes('/edit/') && !document.getElementById('hubgee-github-container')) {
                 const btnContainer = document.createElement('div');
                 btnContainer.id = 'hubgee-github-container';
                 btnContainer.style.cssText = `
                     position: fixed; bottom: 20px; right: 20px; z-index: 99999;
-                    display: flex; gap: 10px;
                 `;
-
-                const undoBtn = document.createElement('button');
-                undoBtn.textContent = '⏪ UNDO';
-                undoBtn.style.cssText = `
-                    padding: 16px 20px; background-color: #f59e0b; color: white;
-                    border: none; border-radius: 8px; font-weight: bold; font-size: 16px;
-                    box-shadow: 0 4px 6px rgba(0,0,0,0.3); cursor: pointer;
-                `;
-                
-                undoBtn.onclick = (e) => {
-                    e.preventDefault();
-                    const backupText = GM_getValue('hubgee_backup', '');
-                    if (!backupText) {
-                        showToast("No backup found in memory!", "#ef4444");
-                        return;
-                    }
-                    injectFullEditorText(backupText);
-                    showToast("Restored from persistent backup!", "#f59e0b");
-                };
 
                 const nukeBtn = document.createElement('button');
                 nukeBtn.textContent = '☢️ NUKE & PULL';
@@ -219,41 +144,17 @@
                 nukeBtn.onclick = (e) => {
                     e.preventDefault();
                     
-                    const rawPayload = GM_getValue('hubgee_payload', '{}');
-                    let incomingData;
-                    try { incomingData = JSON.parse(rawPayload); } catch(err) { incomingData = {}; }
-                    
-                    if (!incomingData.text) {
+                    const incomingCode = GM_getValue('hubgee_payload', '');
+                    if (!incomingCode) {
                         showToast("Buffer empty!", "#ef4444");
                         return;
                     }
 
-                    // 1. BACKUP VIA DEEP MEMORY SCRAPE
-                    const currentCode = getFullEditorText();
-                    if (currentCode) {
-                        GM_setValue('hubgee_backup', currentCode);
-                        console.log(`[Hubgee] Backed up ${currentCode.length} chars to GM storage.`);
-                    }
-
-                    // 2. NUKE & INJECT
-                    injectFullEditorText(incomingData.text);
-
-                    // 3. VERIFY VIA DEEP MEMORY SCRAPE
-                    setTimeout(() => {
-                        const checkText = getFullEditorText();
-                        const injectedLength = checkText.length;
-                        const lengthDiff = Math.abs(injectedLength - incomingData.length);
-                        
-                        if (lengthDiff < 50 || injectedLength === 0) { 
-                            showToast(`✅ Verified: Pulled ${incomingData.length} chars!`, '#16a34a');
-                        } else {
-                            showToast(`❌ WARNING: Expected ${incomingData.length} but found ${injectedLength}!`, '#ef4444');
-                            console.error("[Hubgee] Truncation detected. Hit Undo to restore.");
-                        }
-                    }, 150);
+                    triggerNukeEffects();
+                    injectFullEditorText(incomingCode);
+                    showToast(`✅ Pulled payload successfully!`, '#16a34a');
                 };
 
-                btnContainer.appendChild(undoBtn);
                 btnContainer.appendChild(nukeBtn);
                 document.body.appendChild(btnContainer);
             }
