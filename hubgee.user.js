@@ -1,4 +1,4 @@
-// ==UserScript==
+// ==UserScript==. teyheheheh
 // @name         Hubgee - The Tactical Nuke Bridge
 // @namespace    http://tampermonkey.net/
 // @version      2.1
