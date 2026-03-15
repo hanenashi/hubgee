@@ -1,4 +1,3 @@
-
 // ==UserScript==
 // @name         Hubgee - The Tactical Nuke Bridge
 // @namespace    http://tampermonkey.net/
