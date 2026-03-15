@@ -1,8 +1,8 @@
-// ==UserScript== TEST
+// ==UserScript==
 // @name         Hubgee - Undo & Verify Bridge
 // @namespace    http://tampermonkey.net/
-// @version      1.8
-// @description  Bridge with persistent reload-proof undo, payload verification, and native CodeMirror 6 bypass.
+// @version      1.9
+// @description  Bridge with persistent reload-proof undo, payload verification, and Deep React Memory scraping.
 // @match        https://gemini.google.com/*
 // @match        https://github.com/*/edit/*
 // @grant        GM_setValue
@@ -83,140 +83,180 @@
     }
 
     // ==========================================
-    // MODULE 2: GITHUB - CODE MIRROR 6 HACK
+    // MODULE 2: GITHUB - DEEP MEMORY HACK
     // ==========================================
     if (isGitHub) {
         
-        // --- THE HOLY GRAIL: CodeMirror 6 API Extractor ---
+        // --- EXTRACTION: Deep Memory Scraper ---
         function getFullEditorText() {
-            try {
-                const cmContent = document.querySelector('.cm-content');
-                if (cmContent && cmContent.cmView && cmContent.cmView.view) {
-                    const text = cmContent.cmView.view.state.doc.toString();
-                    console.log(`[Hubgee] CM6 backup successful: ${text.length} chars.`);
-                    return text;
+            let bestText = "";
+
+            // Strategy 1: Brute Force CM6 Properties
+            const scanCM6 = (el) => {
+                if(!el) return;
+                for (let key in el) {
+                    try {
+                        let val = el[key];
+                        if (val && typeof val === 'object') {
+                            if (val.state && val.state.doc && typeof val.state.doc.toString === 'function') {
+                                let str = val.state.doc.toString();
+                                if (str.length > bestText.length) bestText = str;
+                            }
+                            if (val.view && val.view.state && val.view.state.doc && typeof val.view.state.doc.toString === 'function') {
+                                let str = val.view.state.doc.toString();
+                                if (str.length > bestText.length) bestText = str;
+                            }
+                        }
+                    } catch(e) {}
                 }
-            } catch (err) {
-                console.error("[Hubgee] CM6 extraction failed:", err);
+            };
+            scanCM6(document.querySelector('.cm-content'));
+            scanCM6(document.querySelector('.cm-editor'));
+
+            // Strategy 2: Deep React Fiber String Mining
+            const elements = ['.cm-content', '.cm-editor', '.react-code-text-editor'];
+            for (let selector of elements) {
+                const el = document.querySelector(selector);
+                if (!el) continue;
+
+                const reactKey = Object.keys(el).find(k => k.startsWith('__reactFiber$'));
+                if (!reactKey) continue;
+
+                let node = el[reactKey];
+                for (let i = 0; i < 50 && node; i++) {
+                    const targets = [node.memoizedProps, node.memoizedState];
+                    for (let obj of targets) {
+                        if (!obj) continue;
+                        for (let key in obj) {
+                            try {
+                                const val = obj[key];
+                                if (typeof val === 'string' && val.length > bestText.length) {
+                                    bestText = val;
+                                } else if (val && typeof val === 'object') {
+                                    if (typeof val.value === 'string' && val.value.length > bestText.length) bestText = val.value;
+                                    if (typeof val.text === 'string' && val.text.length > bestText.length) bestText = val.text;
+                                    if (typeof val.doc === 'string' && val.doc.length > bestText.length) bestText = val.doc;
+                                    // Catch CM6 doc hidden in React state
+                                    if (val.doc && typeof val.doc.toString === 'function') {
+                                        const docStr = val.doc.toString();
+                                        if (docStr.length > bestText.length) bestText = docStr;
+                                    }
+                                }
+                            } catch(e) {}
+                        }
+                    }
+                    node = node.return; // Walk up the React Tree
+                }
             }
             
-            // Fallback to DOM if CM6 isn't loaded
-            console.log("[Hubgee] Falling back to standard DOM extraction...");
+            if (bestText.length > 0) {
+                console.log(`[Hubgee] Deep Memory Extraction successful: ${bestText.length} chars.`);
+                return bestText;
+            }
+
+            // Fallback to DOM
+            console.log("[Hubgee] Memory Hacks failed. Falling back to DOM...");
             document.execCommand('selectAll');
             return document.activeElement?.value || document.querySelector('textarea.file-editor-textarea')?.value || window.getSelection().toString() || "";
         }
 
-        // --- THE HOLY GRAIL: CodeMirror 6 API Injector ---
+        // --- INJECTION: React UI Bypass ---
         function injectFullEditorText(newText) {
-            let injected = false;
-            try {
-                const cmContent = document.querySelector('.cm-content');
-                if (cmContent && cmContent.cmView && cmContent.cmView.view) {
-                    const view = cmContent.cmView.view;
-                    view.dispatch({
-                        changes: { from: 0, to: view.state.doc.length, insert: newText }
-                    });
-                    console.log("[Hubgee] CM6 native injection successful.");
-                    injected = true;
+            document.execCommand('selectAll');
+            document.execCommand('insertText', false, newText);
+            
+            const textarea = document.querySelector('textarea.file-editor-textarea') || document.activeElement;
+            if (textarea && textarea.tagName === 'TEXTAREA') {
+                const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+                if (nativeSetter) {
+                    nativeSetter.call(textarea, newText);
+                } else {
+                    textarea.value = newText;
                 }
-            } catch (err) {
-                console.error("[Hubgee] CM6 native injection failed:", err);
-            }
-
-            // Fallback for older GitHub UI
-            if (!injected) {
-                console.log("[Hubgee] Falling back to React DOM injection...");
-                document.execCommand('selectAll');
-                document.execCommand('insertText', false, newText);
-                
-                const textarea = document.querySelector('textarea.file-editor-textarea') || document.activeElement;
-                if (textarea && textarea.tagName === 'TEXTAREA') {
-                    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
-                    if (nativeSetter) {
-                        nativeSetter.call(textarea, newText);
-                    } else {
-                        textarea.value = newText;
-                    }
-                    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-                    textarea.dispatchEvent(new Event('change', { bubbles: true }));
-                }
+                textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                textarea.dispatchEvent(new Event('change', { bubbles: true }));
             }
         }
 
-        setTimeout(() => {
-            const btnContainer = document.createElement('div');
-            btnContainer.style.cssText = `
-                position: fixed; bottom: 20px; right: 20px; z-index: 99999;
-                display: flex; gap: 10px;
-            `;
+        // Interval checks for soft navigations
+        setInterval(() => {
+            // Only inject if on an edit page and buttons don't exist
+            if (window.location.href.includes('/edit/') && !document.getElementById('hubgee-github-container')) {
+                const btnContainer = document.createElement('div');
+                btnContainer.id = 'hubgee-github-container';
+                btnContainer.style.cssText = `
+                    position: fixed; bottom: 20px; right: 20px; z-index: 99999;
+                    display: flex; gap: 10px;
+                `;
 
-            const undoBtn = document.createElement('button');
-            undoBtn.textContent = '⏪ UNDO';
-            undoBtn.style.cssText = `
-                padding: 16px 20px; background-color: #f59e0b; color: white;
-                border: none; border-radius: 8px; font-weight: bold; font-size: 16px;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.3); cursor: pointer;
-            `;
-            
-            undoBtn.onclick = (e) => {
-                e.preventDefault();
-                const backupText = GM_getValue('hubgee_backup', '');
-                if (!backupText) {
-                    showToast("No backup found in memory!", "#ef4444");
-                    return;
-                }
-                injectFullEditorText(backupText);
-                showToast("Restored from persistent backup!", "#f59e0b");
-            };
-
-            const nukeBtn = document.createElement('button');
-            nukeBtn.textContent = '☢️ NUKE & PULL';
-            nukeBtn.style.cssText = `
-                padding: 16px 24px; background-color: #ef4444; color: white;
-                border: none; border-radius: 8px; font-weight: bold; font-size: 16px;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.3); cursor: pointer;
-            `;
-
-            nukeBtn.onclick = (e) => {
-                e.preventDefault();
+                const undoBtn = document.createElement('button');
+                undoBtn.textContent = '⏪ UNDO';
+                undoBtn.style.cssText = `
+                    padding: 16px 20px; background-color: #f59e0b; color: white;
+                    border: none; border-radius: 8px; font-weight: bold; font-size: 16px;
+                    box-shadow: 0 4px 6px rgba(0,0,0,0.3); cursor: pointer;
+                `;
                 
-                const rawPayload = GM_getValue('hubgee_payload', '{}');
-                let incomingData;
-                try { incomingData = JSON.parse(rawPayload); } catch(err) { incomingData = {}; }
-                
-                if (!incomingData.text) {
-                    showToast("Buffer empty!", "#ef4444");
-                    return;
-                }
-
-                // 1. BACKUP FULL CURRENT CODE VIA CM6 NATIVE STATE
-                const currentCode = getFullEditorText();
-                if (currentCode) {
-                    GM_setValue('hubgee_backup', currentCode);
-                    console.log(`[Hubgee] Backed up ${currentCode.length} chars to GM storage.`);
-                }
-
-                // 2. NUKE & INJECT
-                injectFullEditorText(incomingData.text);
-
-                // 3. VERIFY
-                setTimeout(() => {
-                    const checkText = getFullEditorText();
-                    const injectedLength = checkText.length;
-                    const lengthDiff = Math.abs(injectedLength - incomingData.length);
-                    
-                    if (lengthDiff < 50 || injectedLength === 0) { 
-                        showToast(`✅ Verified: Pulled ${incomingData.length} chars!`, '#16a34a');
-                    } else {
-                        showToast(`❌ WARNING: Expected ${incomingData.length} but found ${injectedLength}!`, '#ef4444');
-                        console.error("[Hubgee] Truncation detected. Hit Undo to restore.");
+                undoBtn.onclick = (e) => {
+                    e.preventDefault();
+                    const backupText = GM_getValue('hubgee_backup', '');
+                    if (!backupText) {
+                        showToast("No backup found in memory!", "#ef4444");
+                        return;
                     }
-                }, 150);
-            };
+                    injectFullEditorText(backupText);
+                    showToast("Restored from persistent backup!", "#f59e0b");
+                };
 
-            btnContainer.appendChild(undoBtn);
-            btnContainer.appendChild(nukeBtn);
-            document.body.appendChild(btnContainer);
-        }, 2500); 
+                const nukeBtn = document.createElement('button');
+                nukeBtn.textContent = '☢️ NUKE & PULL';
+                nukeBtn.style.cssText = `
+                    padding: 16px 24px; background-color: #ef4444; color: white;
+                    border: none; border-radius: 8px; font-weight: bold; font-size: 16px;
+                    box-shadow: 0 4px 6px rgba(0,0,0,0.3); cursor: pointer;
+                `;
+
+                nukeBtn.onclick = (e) => {
+                    e.preventDefault();
+                    
+                    const rawPayload = GM_getValue('hubgee_payload', '{}');
+                    let incomingData;
+                    try { incomingData = JSON.parse(rawPayload); } catch(err) { incomingData = {}; }
+                    
+                    if (!incomingData.text) {
+                        showToast("Buffer empty!", "#ef4444");
+                        return;
+                    }
+
+                    // 1. BACKUP VIA DEEP MEMORY SCRAPE
+                    const currentCode = getFullEditorText();
+                    if (currentCode) {
+                        GM_setValue('hubgee_backup', currentCode);
+                        console.log(`[Hubgee] Backed up ${currentCode.length} chars to GM storage.`);
+                    }
+
+                    // 2. NUKE & INJECT
+                    injectFullEditorText(incomingData.text);
+
+                    // 3. VERIFY VIA DEEP MEMORY SCRAPE
+                    setTimeout(() => {
+                        const checkText = getFullEditorText();
+                        const injectedLength = checkText.length;
+                        const lengthDiff = Math.abs(injectedLength - incomingData.length);
+                        
+                        if (lengthDiff < 50 || injectedLength === 0) { 
+                            showToast(`✅ Verified: Pulled ${incomingData.length} chars!`, '#16a34a');
+                        } else {
+                            showToast(`❌ WARNING: Expected ${incomingData.length} but found ${injectedLength}!`, '#ef4444');
+                            console.error("[Hubgee] Truncation detected. Hit Undo to restore.");
+                        }
+                    }, 150);
+                };
+
+                btnContainer.appendChild(undoBtn);
+                btnContainer.appendChild(nukeBtn);
+                document.body.appendChild(btnContainer);
+            }
+        }, 1500); 
     }
 })();
