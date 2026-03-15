@@ -1,7 +1,7 @@
-// ==UserScript==. teyheheheh
+// ==UserScript==
 // @name         Hubgee - The Tactical Nuke Bridge
 // @namespace    http://tampermonkey.net/
-// @version      2.1
+// @version      2.2
 // @description  Lean bridge between Gemini and GitHub. Overwrites code with haptic and visual feedback.
 // @match        https://gemini.google.com/*
 // @match        https://github.com/*/edit/*
@@ -99,12 +99,10 @@
         }
 
         function triggerNukeEffects() {
-            // 1. Haptics: brrr, brrrr, brrrrrrrrrr
             if (navigator.vibrate) {
                 navigator.vibrate([100, 50, 200, 50, 500]);
             }
 
-            // 2. Visuals: Harsh red screen flash
             const flash = document.createElement('div');
             flash.style.cssText = `
                 position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
@@ -114,14 +112,12 @@
             `;
             document.body.appendChild(flash);
             
-            // Trigger the fade out immediately after the browser paints it
             requestAnimationFrame(() => {
                 requestAnimationFrame(() => {
                     flash.style.opacity = '0';
                 });
             });
             
-            // Clean up the DOM after the fade
             setTimeout(() => flash.remove(), 400);
         }
 
@@ -144,10 +140,20 @@
                 nukeBtn.onclick = (e) => {
                     e.preventDefault();
                     
-                    const incomingCode = GM_getValue('hubgee_payload', '');
+                    let incomingCode = GM_getValue('hubgee_payload', '');
                     if (!incomingCode) {
                         showToast("Buffer empty!", "#ef4444");
                         return;
+                    }
+
+                    // SAFETY CHECK: If the payload is old JSON, unwrap it.
+                    try {
+                        const parsed = JSON.parse(incomingCode);
+                        if (parsed && parsed.text) {
+                            incomingCode = parsed.text;
+                        }
+                    } catch (err) {
+                        // It's a raw string (v2.0+), which is exactly what we want. Do nothing.
                     }
 
                     triggerNukeEffects();
